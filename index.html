@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RefillIQ — Smart LPG Forecasting & Route Optimization</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Lightweight XLSX parser support (falls back gracefully to robust internal CSV parser) -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Application Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-text">
+        <h1>RefillIQ <span class="brand-badge">Distributor Pro</span></h1>
+        <p>LPG Demand Prediction & Delivery Route Optimizer</p>
+      </div>
+    </div>
+
+    <div class="header-stats">
+      <div class="stat-item">
+        <span class="stat-label">Total Households</span>
+        <span class="stat-val" id="statTotalHouseholds">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Action Needed (≤3d)</span>
+        <span class="stat-val critical" id="statUrgentCount">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Distance Saved</span>
+        <span class="stat-val highlight" id="statKmSaved">0.0 km</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Depot Hub</span>
+        <span class="stat-val" id="statDepotLocation" style="font-size: 0.95rem;">(0.0, 0.0)</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Action Toolbar -->
+  <div class="toolbar">
+    <div class="toolbar-group">
+      <button class="btn btn-primary" id="openAddModalBtn">
+        <span>➕</span> Add Household
+      </button>
+      <button class="btn btn-secondary" id="openImportModalBtn">
+        <span>📁</span> Import Excel / CSV
+      </button>
+      <button class="btn btn-accent" id="setDepotBtn">
+        <span>📍</span> Set Depot
+      </button>
+    </div>
+
+    <div class="toolbar-group">
+      <button class="btn btn-secondary" id="loadSampleDataBtn" title="Load realistic sample data">
+        <span>🔄</span> Load Sample Data
+      </button>
+      <button class="btn btn-danger" id="clearAllBtn" title="Clear all stored households">
+        <span>🗑️</span> Clear All
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Container -->
+  <main class="app-container">
+    
+    <!-- Left Pane: Data & Route Tabs -->
+    <section class="left-pane">
+      <div class="pane-tabs">
+        <div class="pane-tab active" data-tab="householdsTab">
+          <span>👥 Households</span>
+          <span class="tab-badge" id="householdsTabBadge">0</span>
+        </div>
+        <div class="pane-tab" data-tab="routesTab">
+          <span>🚚 Route Optimization</span>
+          <span class="tab-badge" id="routesTabBadge">0 to deliver</span>
+        </div>
+      </div>
+
+      <!-- Households Tab Content -->
+      <div class="pane-content" id="householdsTab">
+        <!-- Quick Filter Pills -->
+        <div class="filter-bar">
+          <button class="filter-btn active" data-filter="all">All (<span id="countAll">0</span>)</button>
+          <button class="filter-btn" data-filter="overdue">Overdue (<span id="countOverdue">0</span>)</button>
+          <button class="filter-btn" data-filter="urgent">Urgent ≤3d (<span id="countUrgent">0</span>)</button>
+          <button class="filter-btn" data-filter="due-soon">Due Soon ≤7d (<span id="countDueSoon">0</span>)</button>
+          <button class="filter-btn" data-filter="safe">Safe (<span id="countSafe">0</span>)</button>
+        </div>
+
+        <!-- Cards List -->
+        <div class="household-list" id="householdListContainer">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+
+      <!-- Route Optimization Tab Content -->
+      <div class="pane-content" id="routesTab" style="display: none;">
+        <div class="route-summary-box">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <h3 style="font-size: 0.95rem; font-weight:700;">Delivery Dispatch Comparison</h3>
+            <span style="font-size: 0.75rem; color: var(--text-muted);" id="routeScopeLabel">Delivering to households due within 7 days</span>
+          </div>
+          <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4;">
+            Comparing naive sequential dispatch order with 2-Opt Traveling Salesperson optimized route from and back to your Depot hub.
+          </p>
+
+          <!-- Before & After Comparison Grid -->
+          <div class="comparison-grid">
+            <div class="comparison-col before">
+              <div class="comparison-title">Before (Unoptimized)</div>
+              <div class="comparison-num" id="beforeDistance">0.0 km</div>
+              <div class="comparison-sub" id="beforeDuration">~0 mins trip</div>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-top:4px;">FIFO / Manual order</div>
+            </div>
+
+            <div class="comparison-col after">
+              <div class="comparison-title">After (Optimized)</div>
+              <div class="comparison-num" id="afterDistance">0.0 km</div>
+              <div class="comparison-sub" id="afterDuration">~0 mins trip</div>
+              <div style="font-size:0.72rem; color:var(--primary); font-weight:600; margin-top:4px;">✓ TSP 2-Opt shortest loop</div>
+            </div>
+          </div>
+
+          <!-- Savings Banner -->
+          <div class="savings-banner" id="savingsBanner">
+            <div>
+              <div class="savings-label">Efficiency Gain</div>
+              <div style="font-size: 0.75rem; opacity: 0.9;" id="savingsFuel">Est. fuel saved: 0.0 L</div>
+            </div>
+            <div class="savings-val" id="savingsVal">-0.0 km (0%)</div>
+          </div>
+
+          <!-- Turn by Turn Sequence -->
+          <div style="margin-top: 16px;">
+            <h4 style="font-size: 0.85rem; font-weight: 700; margin-bottom: 8px;">Optimized Stop-by-Stop Itinerary</h4>
+            <div class="itinerary-list" id="itineraryListContainer">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Pane: Interactive Map Canvas -->
+    <section class="map-pane">
+      <div class="map-toolbar">
+        <button class="map-tool-btn active" id="toggleOptimizedRouteBtn">✓ Optimized Route</button>
+        <button class="map-tool-btn" id="toggleBeforeRouteBtn">Dashed Before Route</button>
+        <button class="map-tool-btn" id="resetMapViewBtn">Center View</button>
+      </div>
+
+      <div class="depot-alert-banner" id="depotAlertBanner">
+        🎯 Click anywhere on the map to place the Depot
+      </div>
+
+      <canvas id="mapCanvas"></canvas>
+
+      <div class="map-legend">
+        <div style="font-weight:700; margin-bottom:2px; font-size:0.72rem; text-transform:uppercase; color:#94a3b8;">Map Key</div>
+        <div class="legend-item"><span class="legend-dot depot"></span> <span>Depot Hub (Distributor)</span></div>
+        <div class="legend-item"><span class="legend-dot overdue"></span> <span>Overdue (Empty / Critical)</span></div>
+        <div class="legend-item"><span class="legend-dot urgent"></span> <span>Urgent (≤3 days remaining)</span></div>
+        <div class="legend-item"><span class="legend-dot due-soon"></span> <span>Due Soon (4–7 days)</span></div>
+        <div class="legend-item"><span class="legend-dot safe"></span> <span>Safe (&gt;7 days)</span></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 1. Add Household Modal (Strictly 4 User Fields) -->
+  <div class="modal-backdrop" id="addHouseholdModal">
+    <div class="modal-window">
+      <div class="modal-header">
+        <h2>Add Household</h2>
+        <button class="close-btn" id="closeAddModalBtn">&times;</button>
+      </div>
+      <form id="addHouseholdForm">
+        <div class="modal-body">
+          <!-- Field 1: Name -->
+          <div class="form-group">
+            <label class="form-label" for="hhName">1. Household / Customer Name</label>
+            <input type="text" id="hhName" class="form-control" placeholder="e.g. Sharma Residence, Apex Bakery" required autofocus>
+          </div>
+
+          <!-- Field 2: Area (Locality dropdown or type custom) -->
+          <div class="form-group">
+            <label class="form-label" for="hhArea">
+              2. Area / Locality 
+              <span class="helper">(select from list or type a new one)</span>
+            </label>
+            <input list="areaDataList" id="hhArea" class="form-control" placeholder="Select or type area name..." required>
+            <datalist id="areaDataList">
+              <!-- Dynamically populated -->
+            </datalist>
+            <span class="field-hint">Households in this area will be placed automatically without needing coordinates.</span>
+          </div>
+
+          <!-- Field 3: People in household -->
+          <div class="form-group">
+            <label class="form-label" for="hhPeople">3. People in Household</label>
+            <input type="number" id="hhPeople" class="form-control" value="4" min="1" max="30" required>
+            <span class="field-hint">Used to calculate consumption rate and estimate refill intervals if only 1 date is known.</span>
+          </div>
+
+          <!-- Field 4: Refill Dates -->
+          <div class="form-group">
+            <label class="form-label" for="hhDates">
+              4. Refill Dates
+              <span class="helper">(comma or semicolon separated)</span>
+            </label>
+            <input type="text" id="hhDates" class="form-control" placeholder="e.g. 12 Aug, 20 Sep, 28 Oct or 15/05/2026, 02/07/2026" required>
+            <span class="field-hint">
+              Accepts formats like <code>12 Aug</code>, <code>12 Aug 2026</code>, or <code>dd/mm/yyyy</code>. With 1 date, gap is estimated from family size.
+            </span>
+          </div>
+
+          <!-- Automatic Calculation Live Preview (Read-only helper) -->
+          <div class="live-preview-box" id="addLivePreview" style="display: none;">
+            <div style="font-weight:700; color:var(--text-primary); font-size:0.75rem;">⚡ Automatic Calculations Preview:</div>
+            <div id="previewGapsText" class="metric-pill">Gaps: calculating...</div>
+            <div id="previewDaysSinceText" class="metric-pill">Days since refill: calculating...</div>
+            <div id="previewPredictedRunoutText" class="metric-pill">Predicted Runout: calculating...</div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelAddModalBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveHouseholdBtn">Save Household</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Import Excel / CSV Modal -->
+  <div class="modal-backdrop" id="importModal">
+    <div class="modal-window wide">
+      <div class="modal-header">
+        <h2>Import from CSV or Excel</h2>
+        <button class="close-btn" id="closeImportModalBtn">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.4;">
+          Upload a file or paste data. RefillIQ requires only three columns:
+          <strong>name</strong>, <strong>area</strong>, and <strong>refill_dates</strong> (dates separated by semicolons <code>;</code>).
+          The <strong>people</strong> column is optional (defaults to 4).
+        </p>
+
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <input type="file" id="importFileInput" accept=".csv, .xlsx, .xls, .txt" style="font-size:0.85rem;">
+          <span style="font-size:0.8rem; color:var(--text-muted);">or paste raw CSV text below:</span>
+        </div>
+
+        <div class="form-group">
+          <textarea id="importRawText" class="form-control" rows="4" placeholder="name,area,refill_dates,people
+Sharma Villa,North Heights,15 May 2026; 02 Jul 2026; 18 Aug 2026,4
+Green Residency,Downtown,10 Sep 2026,2"></textarea>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end;">
+          <button type="button" class="btn btn-secondary btn-sm" id="validateImportBtn">Analyze & Preview Data</button>
+        </div>
+
+        <!-- Preview Section -->
+        <div id="importPreviewSection" style="display:none; flex-direction:column; gap:12px;">
+          <div class="preview-summary" id="previewSummaryBanner">
+            <span id="previewSummaryText">Analyzing...</span>
+          </div>
+
+          <div class="preview-table-wrap">
+            <table class="preview-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px;">#</th>
+                  <th>Name</th>
+                  <th>Area</th>
+                  <th style="width: 60px;">People</th>
+                  <th>Refill Dates</th>
+                  <th>Validation Status</th>
+                </tr>
+              </thead>
+              <tbody id="previewTableBody">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="cancelImportModalBtn">Close</button>
+        <button type="button" class="btn btn-primary" id="commitImportBtn" disabled>Import Valid Rows</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Core Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>
