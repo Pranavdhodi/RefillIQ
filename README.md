@@ -35,3 +35,6 @@ HTML, CSS and JavaScript (no framework). Runs entirely in the browser.
 ## Next steps
 Real road distances, a machine learning forecast tested on held-out data, and
 WhatsApp reminders to customers.
+
+Made by:
+## Pranav Dhodi
